@@ -3,29 +3,48 @@ import networkx as nx
 from scipy.stats import entropy
 import os
 import warnings
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-#create a graph from EEG
-def create_graph(data):
+def calculate_plv(signal1, signal2):
+    phase1 = np.angle(signal1)
+    phase2 = np.angle(signal2)
+    plv = np.abs(np.mean(np.exp(1j * (phase1 - phase2))))
+    return plv
+
+def create_graph_with_plv(data):
     G = nx.Graph()
-    num_channels = data.shape[0]  #number of EEG channels(electrodes)
+    num_channels = data.shape[0]  #number of EEG channels (electrodes)
     print("Number of electrodes", num_channels)
     for i in range(num_channels):
         channel_entropy = entropy(data[i])
         channel_entropy = np.nan_to_num(channel_entropy, nan=0.0, posinf=0.0, neginf=0.0)
-        G.add_node(i, feature=float(channel_entropy))  # Convert to float
+        G.add_node(i, feature=float(channel_entropy))  #convert to float
+    correlation_coeffs = []
     for i in range(num_channels):
         for j in range(i + 1, num_channels):
-            correlation = np.corrcoef(data[i], data[j])[0, 1]
-            if correlation > 0.5:  #threshold for adding edges
-                G.add_edge(i, j, weight=float(correlation))  #convert to float
-    return G
+            plv = calculate_plv(data[i], data[j])
+            correlation_coeffs.append(plv)
+            if plv > 0.5:  #threshold for adding edges
+                G.add_edge(i, j, weight=float(plv))  #convert to float
+    return G, correlation_coeffs
 
-#load and convert data for each subject
-def convert_eeg_to_graphs(data_path, graph_path, n_sub):
+def average_eeg_data(X_data, y_data, condition):
+    condition_indices = np.where(y_data == condition)[0]
+    condition_data = X_data[condition_indices]
+    averaged_data = np.mean(condition_data, axis=0)
+    return averaged_data
+
+def convert_eeg_to_graphs(data_path, graph_path, image_path, n_sub):
     if not os.path.exists(graph_path):
         os.makedirs(graph_path)
+    if not os.path.exists(image_path):
+        os.makedirs(image_path)
+
+    all_X_data = []
+    all_y_data = []
+    all_correlation_coeffs = []
 
     for sub_id in range(n_sub):
         X_path = os.path.join(data_path, f'X_PS_SR_{sub_id}.npy')
@@ -40,17 +59,46 @@ def convert_eeg_to_graphs(data_path, graph_path, n_sub):
             print(f"Skipping subject {sub_id} due to empty data or labels")
             continue
 
-        for trial in range(min(X_train.shape[0], y_train.shape[0])):
-            trial_data = X_train[trial]  #EEG data for a single trial
-            trial_label = int(y_train[trial])  #ensuring label is an integer
-            graph = create_graph(trial_data)
-            #save the graph in GraphML format
-            graph_file_path = os.path.join(graph_path, f'graph_sub_{sub_id}_trial_{trial}.graphml')
-            nx.write_graphml(graph, graph_file_path)
-            print(f"Saved graph for subject {sub_id}, trial {trial}")
+        all_X_data.append(X_train)
+        all_y_data.append(y_train)
 
-data_path = "np_files"  
-graph_path = "graph_files"  
-n_sub = 28 
+    all_X_data = np.concatenate(all_X_data, axis=0)
+    all_y_data = np.concatenate(all_y_data, axis=0)
 
-convert_eeg_to_graphs(data_path, graph_path, n_sub)
+    for condition in range(4):
+        averaged_data = average_eeg_data(all_X_data, all_y_data, condition)
+        graph, correlation_coeffs = create_graph_with_plv(averaged_data)
+        all_correlation_coeffs.extend(correlation_coeffs)
+        graph_file_path = os.path.join(graph_path, f'graph_condition_{condition}.graphml')
+        nx.write_graphml(graph, graph_file_path)
+        print(f"Saved graph for condition {condition}")
+
+        #visualize and save the graph image
+        node_features = nx.get_node_attributes(graph, 'feature')
+        node_colors = [node_features[node] for node in graph.nodes]
+
+        plt.figure(figsize=(10, 8))
+        pos = nx.spring_layout(graph)
+        nx.draw(graph, pos, with_labels=True, node_color=node_colors, cmap=plt.cm.viridis, node_size=500, edge_color='grey')
+        image_file_path = os.path.join(image_path, f'graph_condition_{condition}.png')
+        plt.savefig(image_file_path)
+        plt.close()
+        print(f"Saved graph image for condition {condition}")
+
+    #plot and save the histogram for the correlation coefficients
+    plt.figure(figsize=(10, 6))
+    plt.hist(all_correlation_coeffs, bins=50, color='blue', edgecolor='black', alpha=0.7)
+    plt.title('Histogram of Correlation Coefficients')
+    plt.xlabel('Correlation Coefficient')
+    plt.ylabel('Frequency')
+    histogram_path = os.path.join(image_path, 'correlation_histogram.png')
+    plt.savefig(histogram_path)
+    plt.close()
+    print(f"Saved histogram of correlation coefficients")
+
+data_path = "np_files"
+graph_path = "graph_files"
+image_path = "graph_images"
+n_sub = 28
+
+convert_eeg_to_graphs(data_path, graph_path, image_path, n_sub)
