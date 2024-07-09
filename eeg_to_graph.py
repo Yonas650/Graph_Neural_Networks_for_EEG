@@ -17,10 +17,12 @@ def create_graph_with_plv(data):
     G = nx.Graph()
     num_channels = data.shape[0]  #number of EEG channels (electrodes)
     print("Number of electrodes", num_channels)
+    node_entropies = []
     for i in range(num_channels):
         channel_entropy = entropy(data[i])
         channel_entropy = np.nan_to_num(channel_entropy, nan=0.0, posinf=0.0, neginf=0.0)
         G.add_node(i, feature=float(channel_entropy))  #convert to float
+        node_entropies.append(channel_entropy)
     correlation_coeffs = []
     for i in range(num_channels):
         for j in range(i + 1, num_channels):
@@ -28,7 +30,7 @@ def create_graph_with_plv(data):
             correlation_coeffs.append(plv)
             if plv > 0.5:  #threshold for adding edges
                 G.add_edge(i, j, weight=float(plv))  #convert to float
-    return G, correlation_coeffs
+    return G, correlation_coeffs, node_entropies
 
 def average_eeg_data(X_data, y_data, condition):
     condition_indices = np.where(y_data == condition)[0]
@@ -45,6 +47,7 @@ def convert_eeg_to_graphs(data_path, graph_path, image_path, n_sub):
     all_X_data = []
     all_y_data = []
     all_correlation_coeffs = []
+    all_entropies = []
 
     for sub_id in range(n_sub):
         X_path = os.path.join(data_path, f'X_PS_SR_{sub_id}.npy')
@@ -66,12 +69,15 @@ def convert_eeg_to_graphs(data_path, graph_path, image_path, n_sub):
     all_y_data = np.concatenate(all_y_data, axis=0)
 
     condition_correlation_coeffs = {condition: [] for condition in range(4)}
+    condition_entropies = {condition: [] for condition in range(4)}
 
     for condition in range(4):
         averaged_data = average_eeg_data(all_X_data, all_y_data, condition)
-        graph, correlation_coeffs = create_graph_with_plv(averaged_data)
+        graph, correlation_coeffs, node_entropies = create_graph_with_plv(averaged_data)
         all_correlation_coeffs.extend(correlation_coeffs)
         condition_correlation_coeffs[condition].extend(correlation_coeffs)
+        all_entropies.extend(node_entropies)
+        condition_entropies[condition].extend(node_entropies)
         graph_file_path = os.path.join(graph_path, f'graph_condition_{condition}.graphml')
         nx.write_graphml(graph, graph_file_path)
         print(f"Saved graph for condition {condition}")
@@ -110,6 +116,29 @@ def convert_eeg_to_graphs(data_path, graph_path, image_path, n_sub):
         plt.savefig(histogram_path)
         plt.close()
         print(f"Saved histogram of correlation coefficients for condition {condition}")
+
+    #plot and save the histogram for the entropy
+    plt.figure(figsize=(10, 6))
+    plt.hist(all_entropies, bins=50, color='green', edgecolor='black', alpha=0.7)
+    plt.title('Histogram of Entropies')
+    plt.xlabel('Entropy')
+    plt.ylabel('Frequency')
+    entropy_histogram_path = os.path.join(image_path, 'entropy_histogram.png')
+    plt.savefig(entropy_histogram_path)
+    plt.close()
+    print(f"Saved histogram of entropies")
+
+    #plot and save histograms for entropy for each condition
+    for condition in range(4):
+        plt.figure(figsize=(10, 6))
+        plt.hist(condition_entropies[condition], bins=50, color='green', edgecolor='black', alpha=0.7)
+        plt.title(f'Histogram of Entropies - Condition {condition}')
+        plt.xlabel('Entropy')
+        plt.ylabel('Frequency')
+        entropy_histogram_path = os.path.join(image_path, f'entropy_histogram_condition_{condition}.png')
+        plt.savefig(entropy_histogram_path)
+        plt.close()
+        print(f"Saved histogram of entropies for condition {condition}")
 
 data_path = "np_files"
 graph_path = "graph_files"
