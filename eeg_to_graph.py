@@ -65,10 +65,13 @@ def convert_eeg_to_graphs(data_path, graph_path, image_path, n_sub):
     all_X_data = np.concatenate(all_X_data, axis=0)
     all_y_data = np.concatenate(all_y_data, axis=0)
 
+    condition_correlation_coeffs = {condition: [] for condition in range(4)}
+
     for condition in range(4):
         averaged_data = average_eeg_data(all_X_data, all_y_data, condition)
         graph, correlation_coeffs = create_graph_with_plv(averaged_data)
         all_correlation_coeffs.extend(correlation_coeffs)
+        condition_correlation_coeffs[condition].extend(correlation_coeffs)
         graph_file_path = os.path.join(graph_path, f'graph_condition_{condition}.graphml')
         nx.write_graphml(graph, graph_file_path)
         print(f"Saved graph for condition {condition}")
@@ -95,6 +98,18 @@ def convert_eeg_to_graphs(data_path, graph_path, image_path, n_sub):
     plt.savefig(histogram_path)
     plt.close()
     print(f"Saved histogram of correlation coefficients")
+
+    #plot and save histograms for each condition
+    for condition in range(4):
+        plt.figure(figsize=(10, 6))
+        plt.hist(condition_correlation_coeffs[condition], bins=50, color='blue', edgecolor='black', alpha=0.7)
+        plt.title(f'Histogram of Correlation Coefficients - Condition {condition}')
+        plt.xlabel('Correlation Coefficient')
+        plt.ylabel('Frequency')
+        histogram_path = os.path.join(image_path, f'correlation_histogram_condition_{condition}.png')
+        plt.savefig(histogram_path)
+        plt.close()
+        print(f"Saved histogram of correlation coefficients for condition {condition}")
 
 data_path = "np_files"
 graph_path = "graph_files"
